@@ -2,6 +2,7 @@
 patch_ka2_21_ensemble.py — Patch ka2_21.ipynb to implement a high-performance ensemble of
                             LightGBM, XGBoost, and CatBoost models.
                             Uses CONDITIONAL target encoding for customer_id to avoid leakage and test set noise.
+                            Uses early stopping on 30 folds to optimize iteration count and prevent overfitting.
 """
 import nbformat
 
@@ -16,11 +17,13 @@ nb.cells[60] = nbformat.v4.new_markdown_cell(
     "### Techniques:\n"
     "1. **Ensemble Blending** — We train three state-of-the-art gradient boosting classifiers (LGBM, XGBoost, CatBoost) "
     "using 30-fold cross-validation and blend their predictions (`0.4 * LGBM + 0.2 * XGBoost + 0.4 * CatBoost`).\n"
-    "2. **Advanced Feature Engineering** — We add zero balance flag, interaction terms (age × active member), credit score activity, "
+    "2. **Early Stopping** — We use early stopping (50 rounds patience, max 1500 estimators) on the out-of-fold validation splits "
+    "to automatically determine the optimal complexity and prevent overfitting.\n"
+    "3. **Advanced Feature Engineering** — We add zero balance flag, interaction terms (age × active member), credit score activity, "
     "and ratio columns (balance-to-salary ratio, products-per-tenure).\n"
-    "3. **Conditional Out-of-Fold Target Encoding** — High-impact target encoding on `last_name` (smoothing=20) and `customer_id` "
+    "4. **Conditional Out-of-Fold Target Encoding** — High-impact target encoding on `last_name` (smoothing=20) and `customer_id` "
     "which is conditional on matching name, country, and gender (smoothing=5) to avoid noise from synthetic duplicate IDs.\n"
-    "4. **Precision-Recall Threshold Optimization** — Instead of a fixed 0.5 threshold, we scan the precision-recall space "
+    "5. **Precision-Recall Threshold Optimization** — Instead of a fixed 0.5 threshold, we scan the precision-recall space "
     "on the OOF blend probabilities to find the threshold that maximizes the F1 score.\n"
 )
 
@@ -114,9 +117,9 @@ nb.cells[61] = nbformat.v4.new_code_cell(cell61)
 
 # ── Cell 62: Model training + Blending + Threshold optimization ───────────────
 cell62 = '''\
-# ── Fit 30-fold Ensemble of LightGBM, XGBoost, and CatBoost ──────────────────
+# ── Fit 30-fold Ensemble of LightGBM, XGBoost, and CatBoost with Early Stopping ──
 from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
+from lightgbm import LGBMClassifier, early_stopping
 from catboost import CatBoostClassifier
 
 oof_lgb = np.zeros(len(X_final))
@@ -129,26 +132,26 @@ test_cat = np.zeros(len(X_final_test))
 
 skf_final = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=42)
 
-print("Training ensemble models across 30 folds...")
+print("Training ensemble models across 30 folds with early stopping...")
 for fold, (train_idx, val_idx) in enumerate(skf_final.split(X_final, y_final)):
     X_tr, y_tr = X_final.iloc[train_idx], y_final.iloc[train_idx]
-    X_va = X_final.iloc[val_idx]
+    X_va, y_va = X_final.iloc[val_idx], y_final.iloc[val_idx]
 
-    # LightGBM Classifier
-    lgb = LGBMClassifier(n_estimators=300, learning_rate=0.03, random_state=42 + fold, verbose=-1)
-    lgb.fit(X_tr, y_tr)
+    # LightGBM Classifier with early stopping
+    lgb = LGBMClassifier(n_estimators=1500, learning_rate=0.03, random_state=42 + fold, verbose=-1)
+    lgb.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], callbacks=[early_stopping(50, verbose=False)])
     oof_lgb[val_idx] = lgb.predict_proba(X_va)[:, 1]
     test_lgb += lgb.predict_proba(X_final_test)[:, 1] / N_FOLDS
 
-    # XGBoost Classifier
-    xgb = XGBClassifier(n_estimators=300, learning_rate=0.03, max_depth=5, random_state=42 + fold, verbosity=0)
-    xgb.fit(X_tr, y_tr)
+    # XGBoost Classifier with early stopping
+    xgb = XGBClassifier(n_estimators=1500, learning_rate=0.03, max_depth=5, random_state=42 + fold, verbosity=0, early_stopping_rounds=50)
+    xgb.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], verbose=False)
     oof_xgb[val_idx] = xgb.predict_proba(X_va)[:, 1]
     test_xgb += xgb.predict_proba(X_final_test)[:, 1] / N_FOLDS
 
-    # CatBoost Classifier
-    cat = CatBoostClassifier(iterations=300, learning_rate=0.03, depth=6, random_state=42 + fold, verbose=0)
-    cat.fit(X_tr, y_tr)
+    # CatBoost Classifier with early stopping
+    cat = CatBoostClassifier(iterations=1500, learning_rate=0.03, depth=6, random_state=42 + fold, verbose=0, early_stopping_rounds=50)
+    cat.fit(X_tr, y_tr, eval_set=(X_va, y_va), verbose=False)
     oof_cat[val_idx] = cat.predict_proba(X_va)[:, 1]
     test_cat += cat.predict_proba(X_final_test)[:, 1] / N_FOLDS
 
@@ -205,4 +208,4 @@ nb.cells = nb.cells[:64]
 with open('ka2_21.ipynb', 'w', encoding='utf-8') as f:
     nbformat.write(nb, f)
 
-print("ka2_21.ipynb patched with conditional ensemble. Cells: %d" % len(nb.cells))
+print("ka2_21.ipynb patched with early-stopped ensemble. Cells: %d" % len(nb.cells))
