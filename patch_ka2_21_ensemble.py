@@ -1,7 +1,7 @@
 """
 patch_ka2_21_ensemble.py — Patch ka2_21.ipynb to implement a high-performance ensemble of
                             LightGBM, XGBoost, and CatBoost models.
-                            Verified validation/test score is > 0.70.
+                            Uses CONDITIONAL target encoding for customer_id to avoid leakage and test set noise.
 """
 import nbformat
 
@@ -18,8 +18,8 @@ nb.cells[60] = nbformat.v4.new_markdown_cell(
     "using 30-fold cross-validation and blend their predictions (`0.4 * LGBM + 0.2 * XGBoost + 0.4 * CatBoost`).\n"
     "2. **Advanced Feature Engineering** — We add zero balance flag, interaction terms (age × active member), credit score activity, "
     "and ratio columns (balance-to-salary ratio, products-per-tenure).\n"
-    "3. **Dual OOF Target Encoding** — High-impact target encoding on `last_name` (smoothing=20) and `customer_id` (smoothing=5) "
-    "calculated strictly out-of-fold using 30 splits to prevent leakage.\n"
+    "3. **Conditional Out-of-Fold Target Encoding** — High-impact target encoding on `last_name` (smoothing=20) and `customer_id` "
+    "which is conditional on matching name, country, and gender (smoothing=5) to avoid noise from synthetic duplicate IDs.\n"
     "4. **Precision-Recall Threshold Optimization** — Instead of a fixed 0.5 threshold, we scan the precision-recall space "
     "on the OOF blend probabilities to find the threshold that maximizes the F1 score.\n"
 )
@@ -53,7 +53,7 @@ for df in [train_final, test_final]:
     df["credit_active"] = df["credit_score"] * df["is_active"]
     df["is_active_products"] = df["is_active"] * df["prod_count"]
 
-# ── Out-of-Fold Target Encoding (30 splits) ───────────────────────────────────
+# ── Conditional Target Encoding (30 splits) ───────────────────────────────────
 N_FOLDS     = 30
 LN_SMOOTH   = 20
 CID_SMOOTH  = 5
@@ -68,26 +68,32 @@ train_final["customer_id_te"] = np.nan
 for train_idx, val_idx in skf.split(train_final, y_final):
     tr = train_final.iloc[train_idx]
 
+    # last_name TE (smoothing=20)
     ln    = tr.groupby("last_name")["exit_status"].agg(["count", "mean"])
     ln_te = (ln["count"] * ln["mean"] + LN_SMOOTH * global_mean) / (ln["count"] + LN_SMOOTH)
     train_final.loc[val_idx, "last_name_te"] = (
         train_final.iloc[val_idx]["last_name"].map(ln_te).fillna(global_mean)
     )
 
-    cid    = tr.groupby("customer_id")["exit_status"].agg(["count", "mean"])
+    # Conditional customer_id TE (group by customer_id, last_name, country, gender to avoid synthetic duplicates noise)
+    cid    = tr.groupby(["customer_id", "last_name", "country", "gender"])["exit_status"].agg(["count", "mean"])
     cid_te = (cid["count"] * cid["mean"] + CID_SMOOTH * global_mean) / (cid["count"] + CID_SMOOTH)
-    train_final.loc[val_idx, "customer_id_te"] = (
-        train_final.iloc[val_idx]["customer_id"].map(cid_te).fillna(global_mean)
-    )
+    
+    val_df = train_final.iloc[val_idx]
+    val_keys = val_df[["customer_id", "last_name", "country", "gender"]]
+    mapped = val_keys.set_index(["customer_id", "last_name", "country", "gender"]).index.map(cid_te).fillna(global_mean)
+    train_final.loc[val_idx, "customer_id_te"] = mapped
 
 # Full-train encodings for test set
 ln_full  = train_final.groupby("last_name")["exit_status"].agg(["count", "mean"])
 ln_fte   = (ln_full["count"] * ln_full["mean"] + LN_SMOOTH * global_mean) / (ln_full["count"] + LN_SMOOTH)
 test_final["last_name_te"] = test_final["last_name"].map(ln_fte).fillna(global_mean)
 
-cid_full = train_final.groupby("customer_id")["exit_status"].agg(["count", "mean"])
+cid_full = train_final.groupby(["customer_id", "last_name", "country", "gender"])["exit_status"].agg(["count", "mean"])
 cid_fte  = (cid_full["count"] * cid_full["mean"] + CID_SMOOTH * global_mean) / (cid_full["count"] + CID_SMOOTH)
-test_final["customer_id_te"] = test_final["customer_id"].map(cid_fte).fillna(global_mean)
+
+test_keys = test_final[["customer_id", "last_name", "country", "gender"]]
+test_final["customer_id_te"] = test_keys.set_index(["customer_id", "last_name", "country", "gender"]).index.map(cid_fte).fillna(global_mean)
 
 # ── Categorical One-Hot Encoding ─────────────────────────────────────────────
 num_cols  = ["credit_score", "age", "tenure", "acc_balance", "prod_count", "has_card", "is_active", "estimated_salary",
@@ -199,4 +205,4 @@ nb.cells = nb.cells[:64]
 with open('ka2_21.ipynb', 'w', encoding='utf-8') as f:
     nbformat.write(nb, f)
 
-print("ka2_21.ipynb patched with high-performance ensemble. Cells: %d" % len(nb.cells))
+print("ka2_21.ipynb patched with conditional ensemble. Cells: %d" % len(nb.cells))
