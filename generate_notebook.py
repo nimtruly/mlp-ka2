@@ -5,13 +5,13 @@ nb = nbf.v4.new_notebook()
 cells = []
 
 # Title & Overview
-cells.append(nbf.v4.new_markdown_cell("""# Bank Customer Churn Classification (Simplified High-Performance Pipeline)
-## End-to-End Machine Learning Workflow & Submission Notebook
+cells.append(nbf.v4.new_markdown_cell("""# IITM Machine Learning Practice (MLP) - Classification Assignment
+## Customer Churn Prediction (`exit_status`)
 
-### Notebook Overview
-This notebook presents a simplified, streamlined Machine Learning pipeline designed to predict customer churn (`exit_status`).
+### Executive Summary
+This Jupyter Notebook implements a complete, end-to-end Machine Learning pipeline developed for the **IIT Madras (IITM) Machine Learning Practice (MLP)** classification assignment. The goal is to predict whether a customer of a financial institution will exit (`exit_status`).
 
-### Rubric Checklist:
+### Assignment Rubric Compliance Checklist:
 1. **Identify Data Types of Different Columns** (5 pts)
 2. **Present Descriptive Statistics of Numerical Columns** (5 pts)
 3. **Identify and Handle Missing Values** (10 pts)
@@ -23,54 +23,54 @@ This notebook presents a simplified, streamlined Machine Learning pipeline desig
 9. **Hyperparameter Tuning on Any 3 Models** (10 pts)
 10. **Comparison of Model Performances** (10 pts)
 
-### Key Metrics Reached:
-- **ROC-AUC Score**: **0.8831** (Exceeds the 0.80+ target!)
-- **Accuracy Score**: **86.53%**
-- **Binary F1 Score**: **0.6575** (Achieved with optimal ~0.35 probability cutoff)
-- **Just-In-Time Imports**: All libraries, metrics, and models imported right before usage.
-- **Auto-Increment Submission Counter**: Automatically saves `submission{counter}.csv` (e.g. `submission1.csv`, `submission15.csv`) and `submission.csv` on every notebook execution.
+### Key Strategy Directives:
+- **Clean & Standard Scikit-Learn Code**: Uses standard `scikit-learn` transformers and pipelines.
+- **Just-In-Time Imports**: Libraries are imported right before their first use.
+- **Out-of-Fold (OOF) Target Encoding**: 10-fold Stratified target encoding on `last_name` ($m=20$) to capture surname churn signal without target leakage.
+- **Binary F1 Threshold Optimization**: Probability threshold selection tuned on OOF predictions (~0.35 cutoff targeting ~22% positive rate).
+- **Automated Submission File Counter**: Automatically saves `submission{counter}.csv` (e.g., `submission16.csv`) and `submission.csv` on every run.
 """))
 
 # Section 1: Data Loading & Types
 cells.append(nbf.v4.new_markdown_cell("""---
 ## Section 1: Data Loading & Data Type Identification (5 Points)
-In this section, we load `train.csv` and `test.csv`, display the column names, inspect dataset shapes, and explicitly state data types for all features.
+In this section, we load `train.csv` and `test.csv`, display dataset shapes, inspect feature column names, and explicitly state data types for all columns.
 """))
 
 cells.append(nbf.v4.new_code_cell("""# Import data manipulation library just-in-time
 import pandas as pd
 
-# Load train, test, and sample submission data
+# Load train, test, and sample submission datasets
 train_df = pd.read_csv('train.csv')
 test_df = pd.read_csv('test.csv')
 sample_sub = pd.read_csv('sample_submission.csv')
 
-print(f"Train dataset shape: {train_df.shape}")
-print(f"Test dataset shape:  {test_df.shape}")
-print(f"Sample sub shape:   {sample_sub.shape}\\n")
+print(f"Train Dataset Shape: {train_df.shape}")
+print(f"Test Dataset Shape:  {test_df.shape}")
+print(f"Sample Sub Shape:   {sample_sub.shape}\\n")
 
 print("--- Train Dataset Info ---")
 train_df.info()
 
-print("\\n--- Data Types of Features ---")
+print("\\n--- Explicit Data Types of All Columns ---")
 for col in train_df.columns:
-    print(f"Column: {col:<20} | Type: {str(train_df[col].dtype):<10}")
+    print(f"Column: {col:<20} | Data Type: {str(train_df[col].dtype):<10}")
 """))
 
 cells.append(nbf.v4.new_markdown_cell("""### Feature Classification Summary:
-- **Identifier Columns**: `id` / `record_id`, `customer_id` (Unique identifiers - excluded from modeling)
-- **Categorical Columns**: `last_name` (High-cardinality string surname), `country` (Geography string), `gender` (Gender string)
+- **Identifier Columns**: `id` / `record_id`, `customer_id` (Unique identifiers - dropped from model training feature matrix)
+- **Categorical Columns**: `last_name` (High-cardinality surname), `country` (Residence geography), `gender` (Gender)
 - **Numerical Columns**: `credit_score`, `age`, `tenure`, `acc_balance`, `prod_count`, `has_card`, `is_active`, `estimated_salary`
-- **Target Variable**: `exit_status` (Binary: 0 = Stayed, 1 = Exited)
+- **Target Variable**: `exit_status` (Binary classification target: 0 = Stayed, 1 = Exited)
 """))
 
 # Section 2: Descriptive Statistics
 cells.append(nbf.v4.new_markdown_cell("""---
 ## Section 2: Descriptive Statistics of Numerical Columns (5 Points)
-We present key descriptive statistics (Count, Mean, Std, Min, 25%, Median / 50%, 75%, Max, and Skewness) for all numerical features.
+We present key descriptive statistics (Min, Max, Mean, Median, Standard Deviation, and Skewness) for all numerical columns.
 """))
 
-cells.append(nbf.v4.new_code_cell("""# Define base numerical columns
+cells.append(nbf.v4.new_code_cell("""# Define numerical feature columns
 num_cols = ['credit_score', 'age', 'tenure', 'acc_balance', 'prod_count', 'has_card', 'is_active', 'estimated_salary']
 
 # Calculate descriptive statistics
@@ -78,26 +78,26 @@ desc_stats = train_df[num_cols].describe().T
 desc_stats['median'] = train_df[num_cols].median()
 desc_stats['skewness'] = train_df[num_cols].skew()
 
-# Rearrange columns for clarity
+# Format descriptive statistics table
 stats_table = desc_stats[['min', 'max', 'mean', 'median', 'std', 'skewness']]
-print("=== Descriptive Statistics for Numerical Columns ===")
+print("=== Descriptive Statistics Table ===")
 display(stats_table)
 """))
 
 # Section 3: Missing Values
 cells.append(nbf.v4.new_markdown_cell("""---
 ## Section 3: Identify and Handle Missing Values (10 Points)
-We identify missing values in both training and test datasets and handle them using domain-appropriate imputation techniques.
+We identify missing values in both training and testing datasets and handle them using `SimpleImputer` (Median for numerical features, Mode for categorical features).
 """))
 
-cells.append(nbf.v4.new_code_cell("""# Check missing values
-print("=== Missing Values in Training Set ===")
+cells.append(nbf.v4.new_code_cell("""# Identify missing values
+print("=== Missing Values in Training Dataset ===")
 missing_train = train_df.isnull().sum()
 missing_train_pct = (missing_train / len(train_df)) * 100
 train_missing_df = pd.DataFrame({'Missing Count': missing_train, 'Percentage (%)': missing_train_pct})
 display(train_missing_df[train_missing_df['Missing Count'] > 0])
 
-print("\\n=== Missing Values in Test Set ===")
+print("\\n=== Missing Values in Test Dataset ===")
 missing_test = test_df.isnull().sum()
 missing_test_pct = (missing_test / len(test_df)) * 100
 test_missing_df = pd.DataFrame({'Missing Count': missing_test, 'Percentage (%)': missing_test_pct})
@@ -105,15 +105,15 @@ display(test_missing_df[test_missing_df['Missing Count'] > 0])
 """))
 
 cells.append(nbf.v4.new_markdown_cell("""### Handling Missing Values Rationale:
-- **Numerical Features** (`credit_score`, `acc_balance`, `prod_count`): Imputed with the **median** of the respective training set column. Median is chosen because it is robust against extreme values.
-- **Categorical Features** (`country`): Imputed with the **mode** (most frequent value, e.g. 'France').
-- Imputation parameters are fit ONLY on the training dataset and then applied to both train and test to prevent data leakage.
+- **Numerical Features** (`credit_score`, `acc_balance`, `prod_count`): Imputed with the column **median** of the training data. Median is selected to protect against outlier skewness.
+- **Categorical Features** (`country`): Imputed with the **mode** (most frequent category).
+- Imputation parameters are learned strictly on `train_df` and applied to both `train_df` and `test_df` to prevent data leakage.
 """))
 
-cells.append(nbf.v4.new_code_cell("""# Import SimpleImputer right before using it for imputation
+cells.append(nbf.v4.new_code_cell("""# Import SimpleImputer right before performing imputation
 from sklearn.impute import SimpleImputer
 
-# Numerical imputation (median)
+# Impute numerical features with median
 num_imputer = SimpleImputer(strategy='median')
 cols_to_impute_num = [c for c in num_cols if train_df[c].isnull().sum() > 0 or test_df[c].isnull().sum() > 0]
 
@@ -121,14 +121,14 @@ if cols_to_impute_num:
     train_df[cols_to_impute_num] = num_imputer.fit_transform(train_df[cols_to_impute_num])
     test_df[cols_to_impute_num] = num_imputer.transform(test_df[cols_to_impute_num])
 
-# Categorical imputation (mode)
+# Impute categorical features with mode
 if train_df['country'].isnull().sum() > 0 or test_df['country'].isnull().sum() > 0:
     mode_country = train_df['country'].mode()[0]
     train_df['country'] = train_df['country'].fillna(mode_country)
     test_df['country'] = test_df['country'].fillna(mode_country)
 
-print("Missing values after imputation in Train:", train_df.isnull().sum().sum())
-print("Missing values after imputation in Test: ", test_df.isnull().sum().sum())
+print("Remaining missing values in Train:", train_df.isnull().sum().sum())
+print("Remaining missing values in Test: ", test_df.isnull().sum().sum())
 """))
 
 # Section 4: Duplicate Identification & Handling
@@ -137,15 +137,15 @@ cells.append(nbf.v4.new_markdown_cell("""---
 Checking for duplicate records in training data to ensure clean training without duplicate bias.
 """))
 
-cells.append(nbf.v4.new_code_cell("""# Check duplicates
+cells.append(nbf.v4.new_code_cell("""# Identify duplicate records
 duplicate_count = train_df.duplicated().sum()
 print(f"Total Duplicate Rows Identified in Train Dataset: {duplicate_count}")
 
 if duplicate_count > 0:
     train_df = train_df.drop_duplicates().reset_index(drop=True)
-    print(f"Duplicates dropped. New train shape: {train_df.shape}")
+    print(f"Duplicates dropped successfully. New train shape: {train_df.shape}")
 else:
-    print("No duplicate rows found in dataset.")
+    print("No duplicate records found in training dataset.")
 """))
 
 # Section 5: Outliers
@@ -250,16 +250,17 @@ cells.append(nbf.v4.new_markdown_cell("""> **Insight 3**:
 > 3. `prod_count` shows a negative linear correlation (-0.21), but exhibits strong non-linear behavior (2 products = low churn, 3-4 products = >88% churn).
 """))
 
-# Section 7: Scaling & Encoding
+# Section 7: Encoding & Scaling
 cells.append(nbf.v4.new_markdown_cell("""---
-## Section 7: Target Encoding, Feature Scaling & Categorical Encoding (10 Points)
+## Section 7: Feature Scaling & Categorical Encoding (10 Points)
 
-### Strategy Details:
-1. **Out-of-Fold (OOF) Target Encoding on `last_name` ($m=20$)**:
-   - `last_name` target encoding is computed using 10-fold Stratified K-Fold with smoothing parameter $m=20$:
+### Preprocessing Strategy:
+1. **Out-of-Fold (OOF) Target Encoding on `last_name`**:
+   - `last_name` is a high-cardinality string feature. Out-of-fold target encoding is computed using 10-fold Stratified K-Fold with smoothing parameter $m=20$:
      $$TE = \\frac{n_i \\cdot \\bar{y}_i + 20 \\cdot y_{global}}{n_i + 20}$$
-2. **One-Hot Encoding**: Applied to `country` and `gender`.
-3. **Feature Scaling (`StandardScaler`)**: Applied to continuous numerical features.
+   - **Crucial Rule**: Out-of-fold computation strictly prevents target leakage into training CV evaluation.
+2. **One-Hot Encoding**: Applied to low-cardinality categorical variables (`country`, `gender`).
+3. **Feature Scaling (`StandardScaler`)**: Applied to continuous numerical features to standardize zero mean and unit variance for distance/linear models (Logistic Regression, KNN).
 """))
 
 cells.append(nbf.v4.new_code_cell("""# Import numpy and StratifiedKFold right before target encoding
@@ -489,7 +490,7 @@ cells.append(nbf.v4.new_markdown_cell("""---
 ### Optimization Strategy:
 1. **10-Fold Stratified Out-of-Fold Predictions**: We train `HistGradientBoostingClassifier` across 10 stratified folds leveraging `last_name` target encoding.
 2. **ROC-AUC & F1 Evaluation**: Reaches **0.8831 ROC-AUC** and **0.6575 F1 score** with optimal ~0.35 probability thresholding.
-3. **Automated Counter Submission File**: Automatically scans folder for existing `submission*.csv` files, increments the submission counter (e.g. `submission1.csv`, `submission15.csv`), and writes both `submission{counter}.csv` and `submission.csv`.
+3. **Automated Counter Submission File**: Automatically scans folder for existing `submission*.csv` files, increments the submission counter (e.g. `submission1.csv`, `submission16.csv`), and writes both `submission{counter}.csv` and `submission.csv`.
 """))
 
 cells.append(nbf.v4.new_code_cell("""# 10-Fold OOF Predictions & Probability Generation for HistGradientBoosting
@@ -582,4 +583,4 @@ nb['cells'] = cells
 with open('customer_churn_classification.ipynb', 'w', encoding='utf-8') as f:
     nbf.write(nb, f)
 
-print("Simplified notebook generated as 'customer_churn_classification.ipynb'.")
+print("IITM MLP clean notebook generated as 'customer_churn_classification.ipynb'.")
